@@ -1,0 +1,29 @@
+Package: EMFS
+Type: Package
+Title: Feature screening for clustering analysis
+Version: 1.0.0
+Date: 2025-05-09
+Authors@R: c(person("Changhu","Wang",role = "aut",
+            email = "wangch156@pku.edu.cn",
+            comment = c(ORCID = "0009-0002-8567-0961")),
+            person("Zihao","Chen",role = c("aut","cre"),
+            email = "g.e.challenger@pku.edu.cn",
+            comment = c(ORCID = "0000-0002-1382-0409")),
+            person("Ruibin","Xi",role = c("aut","cph"),
+            email = "ruibinxi@math.pku.edu.cn",
+            comment = c(ORCID = "0000-0001-7545-7361")))
+Description: Feature screening for clustering analysis of count data with an application to single-cell RNA-sequencing. See Wang, Chen and Xi (2023) <https://doi.org/10.48550/arXiv.2306.12671> for more details.
+License: GPL-3 | file LICENSE
+Depends: R(>= 2.10), Rcpp (>= 1.0.5), rlang (>= 1.1.4)
+Imports: 
+    RcppEigen (>= 0.3.3),
+    nloptr (>= 2.0.3),
+    dplyr (>= 1.1.4),
+    stats,
+    lamW (>= 2.2.4),
+LinkingTo: Rcpp, RcppEigen
+Suggests: pbapply
+NeedsCompilation: yes
+RoxygenNote: 7.3.2
+Encoding: UTF-8
+LazyData: true
