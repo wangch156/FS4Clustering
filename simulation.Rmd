@@ -1,0 +1,630 @@
+---
+title: "Simulations for ``Feature screening for
+clustering analysis of count data with an application to
+single-cell RNA-sequencing'' "
+author: "Changhu Wang and Zihao Chen"
+date: "2025-04-19"
+output: html_document
+---
+
+This document presents a simulation study to evaluate the performance of the proposed method -- EM test for feature screening in clustering analysis. Below, we outline the steps involved in the simulation process.
+
+
+```{r setup, include=FALSE}
+library(SingleCellExperiment)
+library(scater)
+library(stringr)
+library(stats)
+library(Seurat)
+library(foreach)
+library(BiocParallel)
+library(BiocGenerics)
+library(parallel)
+library(MASS)
+library(nloptr)
+library(ggplot2)
+library(doParallel)
+library(doSNOW)
+library(mclust)
+library(diptest)
+library(iZID)
+library(EMFS)
+my.goodness <- function(x){
+  require(nloptr)
+  fit.nb <- function(x){
+    # this function returns the MLE of mean and r
+    obj.f <- function(theta){-sum(dnbinom(x,theta[2],mu = theta[1],log = T))}
+    deriv.pl <- function(theta){nl.grad(x0 = theta,fn = obj.f)}
+    nloptr(x0 = c(min(max(mean(x),1e-9*1.01),2999),5),eval_f = obj.f,lb=rep(1e-9,2),ub = rep(3000,2),opts = list("algorithm"="NLOPT_LN_NELDERMEAD","ftol_rel" = 1e-9,"maxeval" = 5000,"maxtime" = 200,"xtol_rel" = 1e-4))$solution
+  }
+  tmp <- floor(quantile(x,c(0.25,0.5,0.75)))
+  if (tmp[1]==tmp[2]) tmp[2] <- tmp[2]+1
+  if (tmp[2]>tmp[3]) tmp[3] <- tmp[2]+1
+  if (tmp[2]==tmp[3]) tmp[3] <- tmp[3]+1
+  freq <- numeric(4)
+  freq[1] <- sum(x<=tmp[1])
+  freq[2] <- sum(x<=tmp[2])-freq[1]
+  freq[3] <- sum(x<=tmp[3])-(freq[1]+freq[2])
+  freq[4] <- sum(x>tmp[3])
+  para <- fit.nb(x)
+  p <- numeric(4)
+  p[1] <- pnbinom(tmp[1],para[2],mu = para[1])
+  p[2] <- pnbinom(tmp[2],para[2],mu = para[1])-p[1]
+  p[3] <- pnbinom(tmp[3],para[2],mu = para[1])-(p[1]+p[2])
+  p[4] <- pnbinom(tmp[3],para[2],mu = para[1],lower.tail = F)
+  test.stat <- chisq.test(freq,p=p,correct = T)
+  pchisq(test.stat$statistic,df = test.stat$parameter-2,lower.tail = F)
+}
+ecdf.em <- function(x){
+  1- pchisq(x,3)
+}
+```
+
+## Step 1: Load the data and set the parameters for the simulation
+
+We begin by defining the parameters for the simulation, including the number of differentially expressed (DE) and non-differentially expressed (non-DE) genes, sample sizes, and other key variables.
+```{r}
+DE.gene_list <- c(20,20,20)
+nonDE.gene_list <- c(500, 5000, 20000) - DE.gene_list
+samples_list <- c(1000)
+K_step = 100
+set.seed(123)
+rep = 100
+Mean_diff_mat = matrix(c(5,6,7,8,9,10), nrow = 3, ncol = 2, byrow = T)
+dispersion_mat = matrix(c(5,6,10,11), nrow = 2, ncol = 2, byrow = T)
+i = 1
+sam = 1
+r = 1
+m = 1
+d = 2
+```
+## Step 2: Generate the simulation data
+
+Next, we generate the simulation data based on the defined parameters. This includes creating a count matrix for DE and non-DE genes and simulating the true labels for clustering.
+
+```{r}
+set.seed(r)
+        samples = samples_list[sam]
+        DE.gene <- DE.gene_list[i]
+        nonDE.gene <- nonDE.gene_list[i]
+        All_gene = DE.gene + nonDE.gene
+        cluster.acc <- numeric(3)
+        counts <- matrix(rep(0,(DE.gene+nonDE.gene)*samples),ncol = samples)
+        colnames(counts) <- paste("Cell",seq(1:samples),sep = "")
+        rownames(counts) <- paste("Gene",seq(1:(DE.gene+nonDE.gene)),sep = "")
+        generate.counts <- function(mu,size, n){
+          rnbinom(n,size  = size, mu = mu)
+        }
+        dispersion_par = dispersion_mat[d,]
+        
+        mu.list = rep(0, All_gene)
+        mu <- sample(exp(seq(log(2),log(5),length.out = 100)),nonDE.gene,replace = T)
+        size = runif(nonDE.gene, dispersion_par[1],dispersion_par[2])
+        mu.list[1:nonDE.gene] <- mu
+        for (k in 1:nonDE.gene){
+          counts[k,] <- generate.counts(mu[k],size[k], samples)
+        }
+        mu <- sample(exp(seq(log(2),log(5),length.out = 100)),DE.gene,replace = T)
+        size = runif(DE.gene, dispersion_par[1],dispersion_par[2])
+        diff_par = Mean_diff_mat[m,]
+        Mean_diff = runif(DE.gene,diff_par[1],diff_par[2])
+        mu2 = mu + Mean_diff
+        mu.list[(nonDE.gene+1):(nonDE.gene+DE.gene)] <- mu
+        alpha_star = c(0.5,0.125,0.125,0.125,0.125)
+        true_label = sample(1:5, samples, replace = T, alpha_star)
+        for (k in 1:DE.gene){
+            counts[(k+nonDE.gene),which(true_label == 1)] <- generate.counts(mu[k],size[k], length(which(true_label == 1)))
+            if ((k %% 4) == 0) index.tmp <-which(true_label == 2)
+            if ((k %% 4) == 1) index.tmp <- which(true_label == 3)
+            if ((k %% 4) == 2) index.tmp <- which(true_label == 4)
+            if ((k %% 4) == 3) index.tmp <- which(true_label == 5)
+            counts[(k+nonDE.gene),index.tmp] <- generate.counts(mu2[k],size[k], length(index.tmp))
+            index.tmp.c = setdiff(setdiff(1:samples, which(true_label == 1)), index.tmp)
+            counts[(k+nonDE.gene),index.tmp.c] <- generate.counts(mu[k],size[k], length(index.tmp.c))
+        }
+true_DE_gene = (nonDE.gene+1):(DE.gene+nonDE.gene)
+```
+
+## Step 3: Obtain the No-Screening clustering results
+
+In this step, we perform clustering without any feature screening and calculate the Adjusted Rand Index (ARI) to evaluate clustering accuracy.
+
+```{r}
+set.seed(r)
+normlize_counts = apply(counts, 1, scale)
+pca_counts = prcomp(normlize_counts)
+res = kmeans(pca_counts$x[,1:10], centers = 5) 
+cluster.labels = res$cluster
+cluster.labels <- factor(cluster.labels)
+levels(cluster.labels) <- 1:length(levels(cluster.labels))
+alpha.label <- numeric(length(levels(cluster.labels)))
+ari_origin = adjustedRandIndex(cluster.labels, true_label)
+cat("No-Screening ARI:", ari_origin, "\n")
+```
+
+## Step 4: Obtain the Oracle clustering results
+
+Here, we use the true DE genes (oracle information) for clustering and calculate the ARI for comparison.
+
+```{r}
+ari_gold = 0
+for (clu in 1:5) {
+  normlize_counts_gold = apply(counts[(nonDE.gene+1) : All_gene, ], 1, scale)
+  pca_counts_gold = prcomp(normlize_counts_gold)
+  res_gold = kmeans(pca_counts_gold$x[,1:10], centers = 5) 
+  cluster.labels_gold = res_gold$cluster
+  cluster.labels_gold <- factor(cluster.labels_gold)
+  levels(cluster.labels_gold) <- 1:length(levels(cluster.labels_gold))
+  ari_gold = max(adjustedRandIndex(cluster.labels_gold, true_label),ari_gold)
+  cat("Oracle ARI:", ari_gold, "\n")
+}
+```
+## Step 5: Obtain the EM results
+
+We now apply the EM test to identify DE genes and evaluate clustering performance using the ARI metric.
+```{r}
+for (g in 1:(length(alpha.label))) {
+        alpha.label[g] <- sum(cluster.labels==g)/length(cluster.labels)
+}
+cl <- makeCluster(getOption("cl.cores", 20))
+registerDoParallel(cl)
+em.result = foreach (j = 1:All_gene, .combine = "cbind",.packages = "EMFS") %dopar% {
+  x = counts[j,]
+  res = EMFS::em_test(x=x,G=length(levels(cluster.labels)),alpha.ini=rbind(alpha.label),K=100,C=1e-5,
+                labels = cluster.labels,
+                prior.weight = 0,earlystop = 1e-5, cut_max = (max(x)+1))
+  return(res)
+}
+stopCluster(cl)
+uset.seed(r)
+```
+### Step 5.1: Obtain the EM-adjust clustering, TP, FP results
+
+We adjust the p-values from the EM test and calculate the ARI, true positives (TP), and false positives (FP).
+```{r}
+        em_p = em.result[1,]
+        em_p_adjust = p.adjust(em_p, method = "BH")
+        ind_em = which(em_p_adjust < 0.05)
+        set.seed(r)
+        ari_em_adj = 0
+        if(length(ind_em) != 0){
+          for (clus in 1:5) {
+            normlize_counts_em = apply(counts[(ind_em), ,drop = F], 1, scale)
+            pca_counts_em = prcomp(normlize_counts_em)
+            res_em = kmeans(pca_counts_em$x[,1:min(10, length(ind_em))], centers = 5)
+            cluster.labels_em = res_em$cluster
+            cluster.labels_em <- factor(cluster.labels_em)
+            levels(cluster.labels_em) <- 1:length(levels(cluster.labels_em))
+            ari_em_adj = max(adjustedRandIndex(cluster.labels_em, true_label),ari_em_adj)
+          }
+        }
+        if (length(ind_em) == 0) {
+          ari_em_adj = 0
+        }
+        TP_em_adj = length(intersect(ind_em, true_DE_gene))
+        FP_em_adj = length(setdiff(ind_em, true_DE_gene))
+        cat("ari_em_adj:", ari_em_adj, "\n")
+        cat("TP_em_adj:", TP_em_adj, "\n")
+        cat("FP_em_adj:", FP_em_adj, "\n")
+```
+
+### Step 5.2: Obtain the EM-threshold clustering, TP, FP results
+
+Using a threshold-based approach, we identify DE genes and evaluate clustering performance.
+```{r}
+        ind_em_threshold = which(em.result[2,] >  samples^(0.35))
+        set.seed(r)
+        ari_em_threshold = 0
+        if(length(ind_em_threshold) != 0){
+          for (clus in 1:5) {
+            normlize_counts_em = apply(counts[(ind_em_threshold), ,drop = F], 1, scale)
+            pca_counts_em = prcomp(normlize_counts_em)
+            res_em = kmeans(pca_counts_em$x[,1:min(10, length(ind_em_threshold))], centers = 5)
+            cluster.labels_em = res_em$cluster
+            cluster.labels_em <- factor(cluster.labels_em)
+            levels(cluster.labels_em) <- 1:length(levels(cluster.labels_em))
+            ari_em_threshold = max(adjustedRandIndex(cluster.labels_em, true_label),ari_em_threshold)
+          }
+        }
+        if (length(ind_em_threshold) == 0) {
+          ari_em_threshold = 0
+        }
+        TP_em_threshold = length(intersect(ind_em_threshold, true_DE_gene))
+        FP_em_threshold = length(setdiff(ind_em_threshold, true_DE_gene))
+        cat("ari_em_threshold:", ari_em_threshold, "\n")
+        cat("TP_em_threshold:", TP_em_threshold, "\n")
+        cat("FP_em_threshold:", FP_em_threshold, "\n")
+```
+
+## Step 6: obtain the Chi results
+
+We perform a Chi-squared goodness-of-fit test to identify DE genes and evaluate clustering accuracy.
+```{r}
+ cl <- makeCluster(getOption("cl.cores", 20))
+        registerDoParallel(cl)
+        res_chi = foreach (j = 1:(DE.gene + nonDE.gene), .combine = "cbind") %dopar% {
+          x = counts[j,]
+          pvalue = my.goodness(x)
+          return(pvalue)
+        }
+        stopCluster(cl)
+        set.seed(r)
+        res_chi_adj = p.adjust(res_chi, method = "BH")
+```
+
+### Step 6.1: Obtain the Chi-adjust clustering, TP, FP results
+
+We adjust the Chi-squared p-values and calculate the ARI, TP, and FP.
+```{r}
+ ind_chi = which(res_chi_adj < 0.05)
+        ari_chi = 0
+        if (length(ind_chi) != 0) {
+          for (clu in 1:5) {
+            normlize_counts_chi = apply(counts[ind_chi, ,drop = F], 1, scale)
+            pca_counts_chi = prcomp(normlize_counts_chi)
+            res_chi_clu = kmeans(pca_counts_chi$x[,1:min(10, length(ind_chi))], centers = 5)
+            cluster.labels_chi = res_chi_clu$cluster
+            cluster.labels_chi <- factor(cluster.labels_chi)
+            levels(cluster.labels_chi) <- 1:length(levels(cluster.labels_chi))
+            ari_chi = max(adjustedRandIndex(cluster.labels_chi, true_label), ari_chi)
+          }
+        }
+        
+        TP_chi = length(intersect(ind_chi, true_DE_gene))
+        FP_chi = length(setdiff(ind_chi, true_DE_gene))
+        cat("ari_chi:", ari_chi, "\n")
+        cat("TP_chi:", TP_chi, "\n")
+        cat("FP_chi:", FP_chi, "\n")
+```
+       
+## Step 7: Obtain the SC-FS results
+
+We apply the SC-FS method to identify DE genes and evaluate clustering performance.
+```{r}
+ cl <- makeCluster(getOption("cl.cores", 20))
+        registerDoParallel(cl)
+        scfs_result = foreach (j = 1:All_gene, .combine = "cbind") %dopar% {
+          x = counts[j,]
+          c = 0
+          group_num = length(levels(cluster.labels))
+          for (g in 1:group_num) {
+            ind_g = which(cluster.labels == g)
+            x_ind_g = x[ind_g]
+            c = c + var(x_ind_g) * (length(ind_g)-1)
+          }
+          m = var(x) * (length(x) - 1)
+          return(c/m)
+        }
+        stopCluster(cl)
+        ind_scfs = which(scfs_result < 0.95)
+```
+
+
+### Step: 7.1 Obtain the SC-FS-adjust clustering, TP, FP results
+
+We calculate the ARI, TP, and FP for the SC-FS method.
+
+
+```{r}
+        ari_scfs = 0
+        if (length(ind_scfs) != 0) {
+          for (clu in 1:5) {
+            normlize_counts_scfs = apply(counts[ind_scfs, ,drop = F], 1, scale)
+            pca_counts_scfs = prcomp(normlize_counts_scfs)
+            res_scfs_clu = kmeans(pca_counts_scfs$x[,1:min(10, length(ind_scfs))], centers = 5)
+            cluster.labels_scfs = res_scfs_clu$cluster
+            cluster.labels_scfs <- factor(cluster.labels_scfs)
+            levels(cluster.labels_scfs) <- 1:length(levels(cluster.labels_scfs))
+            ari_scfs = max(adjustedRandIndex(cluster.labels_scfs, true_label), ari_scfs)
+          }
+        }
+        
+        TP_scfs = length(intersect(ind_scfs, true_DE_gene))
+        FP_scfs = length(setdiff(ind_scfs, true_DE_gene))
+        cat("ari_scfs:", ari_scfs, "\n")
+        cat("TP_scfs:", TP_scfs, "\n")
+        cat("FP_scfs:", FP_scfs, "\n")
+```
+
+## Step 8: Obtain sparse-kmeans test results
+
+We use sparse k-means clustering to identify DE genes and evaluate clustering performance.
+```{r}
+library(sparcl)
+
+      km.perm <- KMeansSparseCluster.permute(normlize_counts,K=5,wbounds=seq(2,20,len=10),nperms=5)
+        spa_kemans = KMeansSparseCluster(x = normlize_counts, K = 5,wbounds = km.perm$bestw)
+        ari_spa = 0
+        for (kk in 1:1) {
+          cluster.labels_spa = factor(spa_kemans[[kk]]$Cs)
+          levels(cluster.labels_spa) <- 1:length(levels(cluster.labels_spa))
+          ari_spa = max(ari_spa, adjustedRandIndex(cluster.labels_spa, true_label))
+        }
+        weight = spa_kemans[[1]]$ws
+        cat("Spase-kmeans ARI:", ari_spa, "\n")
+```
+
+### Step 8.1: obtain sparse-kmeans TP FP results 
+
+We calculate the TP and FP for sparse k-means clustering.
+
+
+```{r}
+        ind_spa = which(weight != 0)
+        TP_spa = length(intersect(ind_spa, true_DE_gene))
+        FP_spa = length(setdiff(ind_spa, true_DE_gene))
+        cat("TP_spa:", TP_spa, "\n")
+        cat("FP_spa:", FP_spa, "\n")
+```
+
+## Step 9: Obtain KS test results
+
+We perform the Kolmogorov-Smirnov (KS) test to identify DE genes and evaluate clustering performance.
+```{r}
+   cl <- makeCluster(getOption("cl.cores", 20))
+        registerDoParallel(cl)
+        ks = rep(0, All_gene)
+        ks_pvalue = rep(0, All_gene)
+        res_ks = foreach (j = 1:(DE.gene + nonDE.gene), .combine = "cbind") %dopar% {
+          x = counts[j,]
+          x[x==0] = 0.05
+          x = log(x)
+          x_center = (x - mean(x)) / sqrt(var(x))
+          ks_test = ks.test(x_center, "pnorm")
+          return(c(ks_test$statistic, ks_test$p.value))
+        }
+        stopCluster(cl)
+```
+
+### Step 9.1: Obtain the KS-adjust clustering, TP, FP results
+
+We adjust the KS test p-values and calculate the ARI, TP, and FP.
+
+
+```{r}
+        set.seed(r)
+        res_ks_adj = p.adjust(res_ks[2,], method = "BH")
+        ind_ks = which(res_ks_adj < 0.05)
+        ari_ks_adj = 0
+        if (length(ind_ks) != 0) {
+          for (clu in 1:5) {
+            normlize_counts_ks = apply(counts[ind_ks, ,drop = F], 1, scale)
+            pca_counts_ks = prcomp(normlize_counts_ks)
+            res_ks_clu = kmeans(pca_counts_ks$x[,1:min(10, length(ind_ks))], centers = 5)
+            cluster.labels_ks = res_ks_clu$cluster
+            cluster.labels_ks <- factor(cluster.labels_ks)
+            levels(cluster.labels_ks) <- 1:length(levels(cluster.labels_ks))
+            ari_ks_adj = max(adjustedRandIndex(cluster.labels_ks, true_label), ari_ks_adj)
+          }
+        }
+        
+        if (length(ind_ks) == 0) {
+          ari_ks_adj = 0
+        }
+        TP_ks_adj = length(intersect(ind_ks, true_DE_gene))
+        FP_ks_adj = length(setdiff(ind_ks, true_DE_gene))
+        cat("ari_ks_adj:", ari_ks_adj, "\n")
+        cat("TP_ks_adj:", TP_ks_adj, "\n")
+        cat("FP_ks_adj:", FP_ks_adj, "\n")
+```
+
+## Step 10: obtain the dip test results
+
+We use the dip test to identify DE genes and evaluate clustering performance.
+```{r}
+library(diptest)
+cl <- makeCluster(getOption("cl.cores", 20))
+        registerDoParallel(cl)
+        res_dip = foreach (j = 1:(DE.gene + nonDE.gene), .combine = "cbind", .packages = "diptest") %dopar% {
+          x = counts[j,]
+          x[x==0] = 0.05
+          x = log(x)
+          x_center = (x - mean(x)) / sqrt(var(x))
+          pvalue = dip.test(x_center)$p.value
+          return(pvalue)
+        }
+        stopCluster(cl)
+        res_dip_adj= p.adjust(res_dip, method = "BH")
+        ind_dip = which(res_dip_adj < 0.05)
+        ari_dip_adj = 0
+        if (length(ind_dip) != 0) {
+          for (clu in 1:5) {
+            normlize_counts_dip = apply(counts[ind_dip, ,drop = F], 1, scale)
+            pca_counts_dip = prcomp(normlize_counts_dip)
+            res_dip_clu = kmeans(pca_counts_dip$x[,1:min(10, length(ind_dip))], centers = 5)
+            cluster.labels_dip = res_dip_clu$cluster
+            cluster.labels_dip <- factor(cluster.labels_dip)
+            levels(cluster.labels_dip) <- 1:length(levels(cluster.labels_dip))
+            ari_dip_adj = max(adjustedRandIndex(cluster.labels_dip, true_label), ari_dip_adj)
+          }
+        }
+        if (length(ind_dip) == 0) {
+          ari_dip_adj = 0
+        }
+        TP_dip_adj = length(intersect(ind_dip, true_DE_gene))
+        FP_dip_adj = length(setdiff(ind_dip, true_DE_gene))
+        cat("ari_dip_adj:", ari_dip_adj, "\n")
+        cat("TP_dip_adj:", TP_dip_adj, "\n")
+        cat("FP_dip_adj:", FP_dip_adj, "\n")
+```        
+        
+## Step 11: Obtain the COSCI results
+
+We apply the COSCI method to identify DE genes and evaluate clustering performance.
+
+
+```{r}
+library(fusionclust)
+  ind_JMVA = NULL
+        ari_JMVA_adj = 0
+        if(All_gene <= 5000){
+          coutnts_log = counts
+          coutnts_log[coutnts_log == 0] = 0.05
+          coutnts_log = log(coutnts_log)
+          scores<- cosci_is(t(coutnts_log),0)
+          features<-cosci_is_select(scores,0.9)
+          ind_JMVA = na.omit(features$selected) 
+        }
+        if (length(ind_JMVA) != 0) {
+          for (clu in 1:5) {
+            normlize_counts_JMVA = apply(counts[ind_JMVA, ,drop = F], 1, scale)
+            pca_counts_JMVA = prcomp(normlize_counts_JMVA)
+            res_JMVA_clu = kmeans(pca_counts_JMVA$x[,1:min(10, length(ind_JMVA))], centers = 5)
+            cluster.labels_JMVA = res_JMVA_clu$cluster
+            cluster.labels_JMVA <- factor(cluster.labels_JMVA)
+            levels(cluster.labels_JMVA) <- 1:length(levels(cluster.labels_JMVA))
+            ari_JMVA_adj = max(adjustedRandIndex(cluster.labels_JMVA, true_label), ari_JMVA_adj)
+          }
+        }
+        if (length(ind_JMVA) == 0) {
+          ari_JMVA_adj = 0
+        }
+        TP_JMVA_adj = length(intersect(ind_JMVA, true_DE_gene))
+        FP_JMVA_adj = length(setdiff(ind_JMVA, true_DE_gene))
+        cat("ari_COSCI_adj:", ari_JMVA_adj, "\n")
+        cat("TP_COSCI_adj:", TP_JMVA_adj, "\n")
+        cat("FP_COSCI_adj:", FP_JMVA_adj, "\n")
+```
+
+## Step 12: Obtain specu and fssem results 
+
+We use spectral clustering and FSSEM to evaluate clustering performance.
+```{r}
+Sys.setenv(RGL_USE_NULL = TRUE)
+library(rgl)
+library(Rdimtools)
+time_specu = Sys.time()
+        specu = do.specu(
+          t(counts), ndim = All_gene, preprocess = "scale"
+        )
+        time_specu = Sys.time() - time_specu
+        data_Y = specu$Y
+        ari_specu = 0
+        for (clu in 1:5) {
+          res_specu = kmeans(data_Y, centers = 5)
+          cluster.labels_specu = res_specu$cluster
+          cluster.labels_specu <- factor(cluster.labels_specu)
+          levels(cluster.labels_specu) <- 1:length(levels(cluster.labels_specu))
+          ari_specu = max(adjustedRandIndex(cluster.labels_specu, true_label),ari_specu)
+        }
+        ari_fssem = 0
+        # time_fssem = Sys.time()
+        # if (All_gene < 1000){
+        #   fssem = do.fssem(
+        #     t(counts), ndim = All_gene, max.k = 2, preprocess = "scale"
+        #   )
+        #   for (clu in 1:5) {
+        #     res_fssem = kmeans(fssem$Y, centers = 5)
+        #     cluster.labels_fssem = res_fssem$cluster
+        #     cluster.labels_fssem <- factor(cluster.labels_fssem)
+        #     levels(cluster.labels_fssem) <- 1:length(levels(cluster.labels_fssem))
+        #     ari_fssem = max(adjustedRandIndex(cluster.labels_fssem, true_label),ari_fssem)
+        #   }
+        # }
+        # time_fssem = Sys.time() - time_fssem
+        cat("ari_specu:", ari_specu, "\n")
+        cat("ari_fssem:", ari_fssem, "\n")
+```
+## Step 13: Obtain the trendvar results
+
+We use the trendVar method to identify highly variable genes and evaluate clustering performance.
+
+
+```{r}
+library(scry)
+library(scran)
+trendVarFS <- function(counts, data) {
+  st <- system.time({
+    sce <- SingleCellExperiment(list(counts = counts, logcounts = data))
+    mgvar <- scran::modelGeneVar(x = sce)
+    top.hvgs <- scran::getTopHVGs(mgvar, n = nrow(mgvar))
+  })
+  
+  return(list("var.out" = mgvar, "genes" = top.hvgs, "st" = st))
+}
+ trendVarFS_se = CreateSeuratObject(counts)
+        trendVarFS_se <- NormalizeData(trendVarFS_se)
+        trendVar_result = trendVarFS(trendVarFS_se@assays$RNA$counts, trendVarFS_se@assays$RNA$data)
+        # or trendVarFS_se@assays$RNA@counts depending on the version of Seurat
+        trendVarFS_select =  which(trendVar_result[["var.out"]]$FDR < 0.05)
+        trendVar_ari = 0
+        FDR_trendVar = 0
+        Power_trendVar = 0
+        if (length(trendVarFS_select) != 0) {
+          for (clu in 1:5) {
+            normlize_counts_trendVar = apply(counts[trendVarFS_select, ,drop = F], 1, scale)
+            pca_counts_trendVar = prcomp(normlize_counts_trendVar)
+            res_trendVar = kmeans(pca_counts_trendVar$x[,1:min(10, length(trendVarFS_select))], centers = 5) 
+            cluster.labels_trendVar = res_trendVar$cluster
+            cluster.labels_trendVar <- factor(cluster.labels_trendVar)
+            levels(cluster.labels_trendVar) <- 1:length(levels(cluster.labels_trendVar))
+            trendVar_ari = max(adjustedRandIndex(cluster.labels_trendVar, true_label),trendVar_ari)
+          }
+          Power_trendVar = sum(trendVarFS_select %in% (nonDE.gene+1):All_gene) / DE.gene
+          FDR_trendVar = sum(trendVarFS_select %in% 1:nonDE.gene) / length(trendVarFS_select)
+        }
+        TP_trendVar = length(intersect(trendVarFS_select, true_DE_gene))
+        FP_trendVar = length(setdiff(trendVarFS_select, true_DE_gene))
+        cat("ari_trendVar:", trendVar_ari, "\n")
+        cat("TP_trendVar:", TP_trendVar, "\n")
+        cat("FP_trendVar:", FP_trendVar, "\n")
+```
+
+## Step 14: obtain the HVG results (only p is large than 2000)
+
+We identify highly variable genes using Seurat and evaluate clustering performance.
+
+
+```{r}
+HVG_seurat = CreateSeuratObject(counts)
+        HVG_seurat <- NormalizeData(HVG_seurat)
+        HVG_seurat <- FindVariableFeatures(HVG_seurat, selection.method = "vst", nfeatures = 2000)
+        HVG_select_2000 = VariableFeatures(HVG_seurat)
+        HVG_select_2000 =  as.numeric(gsub("Gene", "", HVG_select_2000))
+        HVG_ari_2000 = 0
+        FDR_HVG_2000 = 0
+        Power_HVG_2000 = 0
+        if (length(HVG_select_2000) != 0) {
+          for (clu in 1:5) {
+            normlize_counts_HVG_2000 = apply(counts[HVG_select_2000, ,drop = F], 1, scale)
+            pca_counts_HVG_2000 = prcomp(normlize_counts_HVG_2000)
+            res_HVG_2000 = kmeans(pca_counts_HVG_2000$x[,1:min(10, length(HVG_select_2000))], centers = 5) 
+            cluster.labels_HVG_2000 = res_HVG_2000$cluster
+            cluster.labels_HVG_2000 <- factor(cluster.labels_HVG_2000)
+            levels(cluster.labels_HVG_2000) <- 1:length(levels(cluster.labels_HVG_2000))
+            HVG_ari_2000 = max(adjustedRandIndex(cluster.labels_HVG_2000, true_label),HVG_ari_2000)
+          }
+        }
+        if (length(HVG_select_2000) == 0) {
+          HVG_ari_2000 = 0
+        }
+        cat("ari_HVG_2000:", HVG_ari_2000, "\n")
+```
+
+## Step 15: obtain the devianceFS results (only p is large than 2000)
+
+Finally, we use deviance-based feature selection to identify DE genes and evaluate clustering performance.
+
+
+```{r}
+ devianceFS_out <- scry::devianceFeatureSelection(object = counts)
+        devianceFS_select = names(sort(devianceFS_out, decreasing = TRUE)[1:2000])
+        devianceFS_select =  as.numeric(gsub("Gene", "", devianceFS_select))
+        # remove NA 
+        devianceFS_select = devianceFS_select[!is.na(devianceFS_select)]
+        devianceFS_ari = 0
+        FDR_devianceFS = 0
+        Power_devianceFS = 0
+        if (length(devianceFS_select) != 0) {
+          for (clu in 1:5) {
+            normlize_counts_devianceFS = apply(counts[devianceFS_select, ,drop = F], 1, scale)
+            pca_counts_devianceFS = prcomp(normlize_counts_devianceFS)
+            res_devianceFS = kmeans(pca_counts_devianceFS$x[,1:min(10, length(devianceFS_select))], centers = 5) 
+            cluster.labels_devianceFS = res_devianceFS$cluster
+            cluster.labels_devianceFS <- factor(cluster.labels_devianceFS)
+            levels(cluster.labels_devianceFS) <- 1:length(levels(cluster.labels_devianceFS))
+            devianceFS_ari = max(adjustedRandIndex(cluster.labels_devianceFS, true_label),devianceFS_ari)
+          }
+        }
+        cat("ari_devianceFS:", devianceFS_ari, "\n")
+```
