@@ -1,0 +1,108 @@
+---
+title: "Real_data"
+output: pdf_document
+date: "2025-04-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load Data
+
+```{r load_data, warning=FALSE}
+library(Seurat)
+covid <- readRDS("covid19_mono.rds")
+```
+
+## Run EM-test
+
+**Warning**: It may take a long time to run the EM-test. So, we recommend skip this step and use the EM-test result we provided to run the downstream analysis.
+
+```{r EM_test, eval=FALSE, include=TRUE}
+source("covid_emtest.R")
+```
+
+## Select clustering relevant genes
+```{r}
+load("covid_seed321_emtest.RData")
+p.tmp <- matrix(NA,nrow = length(all.genes),ncol = length(em.result))
+rownames(p.tmp) <- all.genes
+for (i in 1:length(em.result)){
+  p.tmp[colnames(em.result[[i]]),i] <- em.result[[i]][1,]
+}
+my.min <- function(x){
+  if (sum(is.na(x))==length(x)){
+    NA
+  } else {
+    min(x,na.rm = T)
+  }
+}
+p.tmp <- apply(p.tmp,1,my.min)
+p.tmp <- p.tmp*length(em.result)
+result.EM = data.frame(names = all.genes, p = p.adjust(p.tmp,"BH"))
+tmp.na <- result.EM[is.na(result.EM$p),1]
+result.EM <- result.EM[!is.na(result.EM$p),]
+em <- rownames(result.EM)[result.EM$p < 0.01]
+print(paste0(length(em), " genes selected."))
+```
+
+## Batch effect removal
+```{r eval=FALSE, warning=FALSE, include=TRUE}
+library(harmony)
+covid <- NormalizeData(covid)
+covid <- ScaleData(covid,vars.to.regress = c("percent.mt"),features = em)
+covid <- RunPCA(covid, verbose = FALSE,features = em)
+covid <- RunHarmony(covid,"patient",plot_convergence = F)
+covid <- FindNeighbors(object = covid, dims = 1:40,reduction = "harmony")
+covid <- FindClusters(object = covid, resolution = 1.5)
+covid <- RunUMAP(covid,reduction = "harmony", dims = 1:40)
+em_umap <- covid@reductions[['umap']]
+em_label <- covid@active.ident
+save(em_umap,em_label,file = "EM_UMAP_label.RData")
+```
+
+*Note*: With different version of Seurat, clustering and UMAP might have slight differences.
+
+## Visualization
+```{r echo=TRUE}
+load("EM_UMAP_label.RData")
+levels(em_label)[levels(em_label) %in% c(2,11)] <- "mDC"
+levels(em_label)[levels(em_label) %in% c(18)] <- "granulo2"
+levels(em_label)[levels(em_label) %in% c(3,16)] <- "granulo1"
+levels(em_label)[levels(em_label) %in% c(8)] <- "mono3"
+levels(em_label)[levels(em_label) %in% c(0,4,5,6,9,10,19,17,20)] <- "mono1"
+levels(em_label)[levels(em_label) %in% c(1,15)] <- "mono2"
+levels(em_label)[levels(em_label) %in% c(13)] <- "mono_IFN"
+levels(em_label)[levels(em_label) %in% c(12)] <- "IL7R+ mono1"
+levels(em_label)[levels(em_label) %in% c(14,7)] <- "IL7R+ mono2"
+covid@reductions[['umap']] <- em_umap
+covid <- AddMetaData(covid,em_label,"Annotation")
+DimPlot(covid,label = T, group.by = "Annotation")
+```
+
+
+```{r eval=FALSE, include=TRUE}
+marker_list <- c("S100A8", "S100A9", # granulo
+              "LYZ","CSTA","NPC2", # granulo1
+              "CXCL10","IDO1","GMPR", # granulo2
+              "CLEC10A", "CD1C", "FCER1A", # mDC
+              #"MRC1", 
+              "MS4A7","CD14","FCGR3A",
+              "LYVE1", # mono1
+              "AIF1", # mono2
+              "SPP1", # mono3
+              #"OLFML3", "P2RY12", "TMEM119", # mono3
+              "IL7R", "TCF7", "CCL5" # IL7R+ monocyte ref: https://www.nature.com/articles/s41467-019-12393-1#:~:text=We%20performed%20parallel%20experiments%20in,mechanism%20of%20disease%20risk%20variants.
+              )
+covid <- ScaleData(covid,features = marker_list,verbose = F)
+covid@active.ident <- factor(em_label, levels = c("IL7R+ mono2","IL7R+ mono1", "mono_IFN",
+                                                   "mono3","mono2","mono1","mDC",
+                                                   "granulo2","granulo1"))
+DotPlot(covid, features = marker_list, cols = c("blue", "red"), 
+        dot.scale = 8,idents = c("IL7R+ mono2","IL7R+ mono1", "mono_IFN",
+                                 "mono3","mono2","mono1","mDC",
+                                 "granulo2","granulo1")) + 
+  RotatedAxis()
+```
+
