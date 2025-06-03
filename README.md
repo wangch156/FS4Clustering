@@ -18,7 +18,7 @@ To install EMFS, start R and enter:
 
     if (!require("pak", quietly = TRUE))
         install.packages("pak")
-    pak::pkg_install("XiDsLab/EMFS")
+    pak::pkg_install("wangch156/EMFS")
 
 
 ## Citations
