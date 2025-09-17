@@ -1,4 +1,4 @@
-# EMFS
+# FS4Clustering
 
 <!-- badges: start -->
 
