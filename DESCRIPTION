@@ -20,7 +20,7 @@ Imports:
     nloptr (>= 2.0.3),
     dplyr (>= 1.1.4),
     stats,
-    lamW (< 2.2.4),
+    lamW (<= 2.2.4),
 LinkingTo: Rcpp, RcppEigen
 Suggests: pbapply
 NeedsCompilation: yes
