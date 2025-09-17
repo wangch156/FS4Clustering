@@ -18,7 +18,7 @@ To install FS4Clustering, start R and enter:
 
     if (!require("pak", quietly = TRUE))
         install.packages("pak")
-    pak::pkg_install("XiDsLab/FS4Clustering")
+    pak::pkg_install("wangch156/FS4Clustering")
 
 
 ## Citations
