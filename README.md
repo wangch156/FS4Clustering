@@ -16,9 +16,9 @@ A feature screening method for ultrahigh-dimensional clustering analysis of coun
 
 To install FS4Clustering, start R and enter:
 
-    if (!require("pak", quietly = TRUE))
-        install.packages("pak")
-    pak::pkg_install("wangch156/FS4Clustering")
+    if (!require("devtools", quietly = TRUE))
+        install.packages("devtools")
+    devtools::install_github("wangch156/FS4Clustering")
 
 
 ## Citations
