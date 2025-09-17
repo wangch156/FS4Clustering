@@ -13,7 +13,7 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 
 // FSEM
 Eigen::VectorXd FSEM(int group_num, double prior_wight, double C, Eigen::MatrixXd w_reduce, Eigen::MatrixXd w0_reduce, Eigen::VectorXd x_reduce, Eigen::VectorXi x_reduce_int, Eigen::VectorXd reduce_num, Eigen::VectorXd theta_old, int k_step, int newtown_step, int cut_max);
-RcppExport SEXP _EMFS_FSEM(SEXP group_numSEXP, SEXP prior_wightSEXP, SEXP CSEXP, SEXP w_reduceSEXP, SEXP w0_reduceSEXP, SEXP x_reduceSEXP, SEXP x_reduce_intSEXP, SEXP reduce_numSEXP, SEXP theta_oldSEXP, SEXP k_stepSEXP, SEXP newtown_stepSEXP, SEXP cut_maxSEXP) {
+RcppExport SEXP _FS4Clustering_FSEM(SEXP group_numSEXP, SEXP prior_wightSEXP, SEXP CSEXP, SEXP w_reduceSEXP, SEXP w0_reduceSEXP, SEXP x_reduceSEXP, SEXP x_reduce_intSEXP, SEXP reduce_numSEXP, SEXP theta_oldSEXP, SEXP k_stepSEXP, SEXP newtown_stepSEXP, SEXP cut_maxSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -35,7 +35,7 @@ END_RCPP
 }
 // compute_pl
 double compute_pl(Eigen::VectorXd theta, Eigen::VectorXi x, Eigen::VectorXd reduce_num, Eigen::VectorXd alpha, int group_num, double C);
-RcppExport SEXP _EMFS_compute_pl(SEXP thetaSEXP, SEXP xSEXP, SEXP reduce_numSEXP, SEXP alphaSEXP, SEXP group_numSEXP, SEXP CSEXP) {
+RcppExport SEXP _FS4Clustering_compute_pl(SEXP thetaSEXP, SEXP xSEXP, SEXP reduce_numSEXP, SEXP alphaSEXP, SEXP group_numSEXP, SEXP CSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -51,7 +51,7 @@ END_RCPP
 }
 // homo_opt
 Eigen::VectorXd homo_opt(Eigen::VectorXd w_reduce, Eigen::VectorXd x_reduce, Eigen::VectorXd reduce_num, int newtown_step, double th, double r);
-RcppExport SEXP _EMFS_homo_opt(SEXP w_reduceSEXP, SEXP x_reduceSEXP, SEXP reduce_numSEXP, SEXP newtown_stepSEXP, SEXP thSEXP, SEXP rSEXP) {
+RcppExport SEXP _FS4Clustering_homo_opt(SEXP w_reduceSEXP, SEXP x_reduceSEXP, SEXP reduce_numSEXP, SEXP newtown_stepSEXP, SEXP thSEXP, SEXP rSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -67,7 +67,7 @@ END_RCPP
 }
 // reduce_w
 Eigen::VectorXd reduce_w(Eigen::VectorXd w, Eigen::VectorXd reduce_num);
-RcppExport SEXP _EMFS_reduce_w(SEXP wSEXP, SEXP reduce_numSEXP) {
+RcppExport SEXP _FS4Clustering_reduce_w(SEXP wSEXP, SEXP reduce_numSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -79,14 +79,14 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_EMFS_FSEM", (DL_FUNC) &_EMFS_FSEM, 12},
-    {"_EMFS_compute_pl", (DL_FUNC) &_EMFS_compute_pl, 6},
-    {"_EMFS_homo_opt", (DL_FUNC) &_EMFS_homo_opt, 6},
-    {"_EMFS_reduce_w", (DL_FUNC) &_EMFS_reduce_w, 2},
+    {"_FS4Clustering_FSEM", (DL_FUNC) &_FS4Clustering_FSEM, 12},
+    {"_FS4Clustering_compute_pl", (DL_FUNC) &_FS4Clustering_compute_pl, 6},
+    {"_FS4Clustering_homo_opt", (DL_FUNC) &_FS4Clustering_homo_opt, 6},
+    {"_FS4Clustering_reduce_w", (DL_FUNC) &_FS4Clustering_reduce_w, 2},
     {NULL, NULL, 0}
 };
 
-RcppExport void R_init_EMFS(DllInfo *dll) {
+RcppExport void R_init_FS4Clustering(DllInfo *dll) {
     R_registerRoutines(dll, NULL, CallEntries, NULL, NULL);
     R_useDynamicSymbols(dll, FALSE);
 }

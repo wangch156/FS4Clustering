@@ -2,18 +2,18 @@
 # Generator token: 10BE3573-1514-4C36-9D1C-5A225CD40393
 
 FSEM <- function(group_num, prior_wight, C, w_reduce, w0_reduce, x_reduce, x_reduce_int, reduce_num, theta_old, k_step = 30L, newtown_step = 50L, cut_max = 50L) {
-    .Call('_EMFS_FSEM', PACKAGE = 'EMFS', group_num, prior_wight, C, w_reduce, w0_reduce, x_reduce, x_reduce_int, reduce_num, theta_old, k_step, newtown_step, cut_max)
+    .Call('_FS4Clustering_FSEM', PACKAGE = 'FS4Clustering', group_num, prior_wight, C, w_reduce, w0_reduce, x_reduce, x_reduce_int, reduce_num, theta_old, k_step, newtown_step, cut_max)
 }
 
 compute_pl <- function(theta, x, reduce_num, alpha, group_num, C) {
-    .Call('_EMFS_compute_pl', PACKAGE = 'EMFS', theta, x, reduce_num, alpha, group_num, C)
+    .Call('_FS4Clustering_compute_pl', PACKAGE = 'FS4Clustering', theta, x, reduce_num, alpha, group_num, C)
 }
 
 homo_opt <- function(w_reduce, x_reduce, reduce_num, newtown_step = 50L, th = 1e-10, r = 5) {
-    .Call('_EMFS_homo_opt', PACKAGE = 'EMFS', w_reduce, x_reduce, reduce_num, newtown_step, th, r)
+    .Call('_FS4Clustering_homo_opt', PACKAGE = 'FS4Clustering', w_reduce, x_reduce, reduce_num, newtown_step, th, r)
 }
 
 reduce_w <- function(w, reduce_num) {
-    .Call('_EMFS_reduce_w', PACKAGE = 'EMFS', w, reduce_num)
+    .Call('_FS4Clustering_reduce_w', PACKAGE = 'FS4Clustering', w, reduce_num)
 }
 
